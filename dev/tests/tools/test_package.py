@@ -72,6 +72,55 @@ class PackageTests(unittest.TestCase):
                             self.assertNotIn(b"hf_legacycredential", content)
                             self.assertNotIn(b"hf_testcredential", content)
 
+    def test_a_no_python_archive_holds_only_the_release_layout(self):
+        """A consuming bundle supplies the interpreter, so none is staged."""
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            for folder, names in (
+                ("install", package.INSTALL_FILES),
+                ("install/completions", package.COMPLETION_FILES),
+                ("server", package.SERVER_FILES),
+                ("server/chat-assets", package.CHAT_ASSET_FILES),
+                ("build", ("splash", "splash.metallib")),
+            ):
+                (root / folder).mkdir(parents=True)
+                for name in names:
+                    (root / folder / name).write_text("fixture")
+            for name in package.LICENSE_FILES:
+                (root / name).write_text("fixture")
+            with (
+                mock.patch.object(package, "ROOT", root),
+                mock.patch.object(
+                    package.subprocess,
+                    "run",
+                    side_effect=AssertionError("a no-python archive ran a program"),
+                ),
+                mock.patch.object(
+                    package.urllib.request,
+                    "urlopen",
+                    side_effect=AssertionError("a no-python archive reached the network"),
+                ),
+                mock.patch("sys.stdout"),
+            ):
+                package.main(
+                    ["--version", "nopy", "--macos-min", "26.4", "--no-python"]
+                )
+            archive = root / "dist/splash-nopy-arm64-macos26.tar.gz"
+            with tarfile.open(archive) as release:
+                names = release.getnames()
+                assert not any("/python/" in name or name.endswith("/python") for name in names)
+                assert "splash-nopy-arm64-macos26/install/launcher.py" in names
+                assert "splash-nopy-arm64-macos26/server/server.py" in names
+                assert "splash-nopy-arm64-macos26/engine/splash" in names
+                assert "splash-nopy-arm64-macos26/LICENSES" not in names
+                layout = json.loads(
+                    release.extractfile(
+                        "splash-nopy-arm64-macos26/release.json"
+                    ).read()
+                )
+                assert layout["version"] == "nopy"
+            assert not (root / "dist/splash.rb").exists()
+
     def test_release_has_only_runtime_files_and_excludes_credentials(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary) / "source"

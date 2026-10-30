@@ -3,9 +3,13 @@ DEV_STAMP = $(VENV)/.dev-requirements-installed
 RELEASE_VERSION ?= $(shell git describe --tags --always)
 
 .PHONY: package package-bottle package-check
+# A release archive normally carries Splash's own Python. PACKAGE_PYTHON=0
+# stages the release layout only, for a bundle that supplies its interpreter.
+PACKAGE_PYTHON ?= 1
+PACKAGE_PYTHON_ARGS = $(if $(filter 0,$(PACKAGE_PYTHON)),--no-python,)
 package: install-environment all
 	$(PYTHON) dev/tools/package.py --version "$(RELEASE_VERSION)" \
-		--macos-min "$(MACOS_MIN_VERSION)"
+		--macos-min "$(MACOS_MIN_VERSION)" $(PACKAGE_PYTHON_ARGS)
 
 package-bottle:
 	$(PYTHON) dev/tools/package_brew.py build --version "$(RELEASE_VERSION)"

@@ -187,6 +187,15 @@ def main(argv=None):
     parser.add_argument(
         "--url", help="published tarball URL; defaults to GitHub Releases"
     )
+    parser.add_argument(
+        "--no-python",
+        action="store_true",
+        help=(
+            "stage the release layout without Splash's Python environment. "
+            "For a bundle that supplies its own interpreter; no Homebrew "
+            "formula is written."
+        ),
+    )
     args = parser.parse_args(argv)
     if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]*", args.version):
         parser.error("invalid release version")
@@ -196,65 +205,68 @@ def main(argv=None):
     archive = dist / f"{name}.tar.gz"
     if archive.exists():
         parser.error(f"release already exists: {archive}")
-    cached = ROOT / "build/release/python-runtime.tar.gz"
-    cached.parent.mkdir(parents=True, exist_ok=True)
-    if not cached.exists() or digest(cached) != PYTHON_SHA256:
-        with tempfile.NamedTemporaryFile(dir=cached.parent) as download:
-            with urllib.request.urlopen(PYTHON_URL, timeout=60) as response:
-                shutil.copyfileobj(response, download)
-            download.flush()
-            if digest(Path(download.name)) != PYTHON_SHA256:
-                raise ValueError("Python distribution checksum mismatch")
-            shutil.copyfile(download.name, cached)
     with tempfile.TemporaryDirectory(prefix=".package-", dir=dist) as temporary:
         stage = Path(temporary) / name
         stage.mkdir()
         stage_runtime(stage, args.version)
-        with tarfile.open(cached) as python:
-            python.extractall(stage, filter="data")
-        python = stage / "python/bin/python3"
-        subprocess.run(
-            [
-                str(python),
-                "-m",
-                "pip",
-                "install",
-                "--disable-pip-version-check",
-                "--only-binary=:all:",
-                "--no-compile",
-                "-r",
-                str(stage / "install/requirements.txt"),
-            ],
-            check=True,
-        )
-        # Exercise imports and the public entry point from the actual staged
-        # runtime, not the developer's virtualenv or source PYTHONPATH.
-        subprocess.run(
-            [
-                str(python),
-                "-I",
-                "-c",
-                "import sys; sys.path.insert(0, '.'); "
-                "import tokenizers, llguidance, numpy, PIL, transformers, huggingface_hub, pypdfium2; "
-                "import server.server, install.launcher",
-            ],
-            cwd=stage,
-            check=True,
-        )
-        # The server's entry point as the launcher starts it, which the
-        # import above does not run. Not isolated: -I would ignore PYTHONPATH.
-        subprocess.run(
-            [str(python), "-P", "-m", "server.server", "--help"],
-            cwd=stage,
-            env={**os.environ, "PYTHONPATH": str(stage)},
-            check=True,
-            stdout=subprocess.DEVNULL,
-        )
-        subprocess.run(
-            [str(python), "-B", str(stage / "install/launcher.py"), "--help"],
-            cwd=stage,
-            check=True,
-        )
+        if not args.no_python:
+            cached = ROOT / "build/release/python-runtime.tar.gz"
+            cached.parent.mkdir(parents=True, exist_ok=True)
+            if not cached.exists() or digest(cached) != PYTHON_SHA256:
+                with tempfile.NamedTemporaryFile(dir=cached.parent) as download:
+                    with urllib.request.urlopen(PYTHON_URL, timeout=60) as response:
+                        shutil.copyfileobj(response, download)
+                    download.flush()
+                    if digest(Path(download.name)) != PYTHON_SHA256:
+                        raise ValueError("Python distribution checksum mismatch")
+                    shutil.copyfile(download.name, cached)
+            with tarfile.open(cached) as python:
+                python.extractall(stage, filter="data")
+            python = stage / "python/bin/python3"
+            subprocess.run(
+                [
+                    str(python),
+                    "-m",
+                    "pip",
+                    "install",
+                    "--disable-pip-version-check",
+                    "--only-binary=:all:",
+                    "--no-compile",
+                    "-r",
+                    str(stage / "install/requirements.txt"),
+                ],
+                check=True,
+            )
+            # Exercise imports and the public entry point from the actual
+            # staged runtime, not the developer's virtualenv or source
+            # PYTHONPATH.
+            subprocess.run(
+                [
+                    str(python),
+                    "-I",
+                    "-c",
+                    "import sys; sys.path.insert(0, '.'); "
+                    "import tokenizers, llguidance, numpy, PIL, transformers, huggingface_hub, pypdfium2; "
+                    "import server.server, install.launcher",
+                ],
+                cwd=stage,
+                check=True,
+            )
+            # The server's entry point as the launcher starts it, which the
+            # import above does not run. Not isolated: -I would ignore
+            # PYTHONPATH.
+            subprocess.run(
+                [str(python), "-P", "-m", "server.server", "--help"],
+                cwd=stage,
+                env={**os.environ, "PYTHONPATH": str(stage)},
+                check=True,
+                stdout=subprocess.DEVNULL,
+            )
+            subprocess.run(
+                [str(python), "-B", str(stage / "install/launcher.py"), "--help"],
+                cwd=stage,
+                check=True,
+            )
         temporary_archive = Path(temporary) / archive.name
         with tarfile.open(temporary_archive, "w:gz") as release:
             release.add(
@@ -267,6 +279,12 @@ def main(argv=None):
         temporary_archive.replace(archive)
     checksum = digest(archive)
     archive.with_suffix(archive.suffix + ".sha256").write_text(checksum + "\n")
+    if args.no_python:
+        print(
+            f"Built {archive} without a Python runtime; no Homebrew formula "
+            "was written."
+        )
+        return
     url = (
         args.url
         or f"https://github.com/incoai/splash/releases/download/{args.version}/{archive.name}"
