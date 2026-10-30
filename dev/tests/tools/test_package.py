@@ -205,10 +205,29 @@ class PackageTests(unittest.TestCase):
                     exec(compile(source, "paths.py", "exec"), namespace)
                     self.assertTrue(namespace["PACKAGED"])
                     self.assertEqual(namespace["BINARY"], prefix / "engine/splash")
-                    self.assertEqual(namespace["PYTHON"], prefix / "python/bin/python3")
+                    self.assertEqual(namespace["PYTHON"], Path(sys.executable))
                     results.append((namespace["MODELS"], namespace["RUNTIME"]))
                 self.assertEqual(results[0], results[1])
                 self.assertTrue(results[0][0].is_relative_to(root / "home"))
+
+    def test_packaged_paths_use_the_interpreter_that_runs_them(self):
+        """A release started from its own python/bin/python3 keeps that file.
+
+        The app starts the same launcher from its shared interpreter, so the
+        packaged branch names whichever interpreter runs it; this pins the
+        stock release's path, where sys.executable is the release's own.
+        """
+        source = Path(paths.__file__).read_text()
+        with tempfile.TemporaryDirectory() as temporary:
+            prefix = Path(temporary).resolve()
+            (prefix / "install").mkdir()
+            (prefix / "release.json").write_text("{}")
+            bundled = prefix / "python/bin/python3"
+            with mock.patch.object(sys, "executable", str(bundled)):
+                namespace = {"__file__": str(prefix / "install/paths.py")}
+                exec(compile(source, "paths.py", "exec"), namespace)
+            self.assertTrue(namespace["PACKAGED"])
+            self.assertEqual(namespace["PYTHON"], bundled)
 
     def test_formula_invokes_bundled_runtime_without_build_or_dependency_install(self):
         text = package.formula(
