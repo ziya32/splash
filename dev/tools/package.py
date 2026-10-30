@@ -319,6 +319,15 @@ def main(argv=None):
     parser.add_argument(
         "--url", help="published tarball URL; defaults to GitHub Releases"
     )
+    parser.add_argument(
+        "--no-python",
+        action="store_true",
+        help=(
+            "stage the release layout without Splash's Python environment. "
+            "For a bundle that supplies its own interpreter; no Homebrew "
+            "formula is written."
+        ),
+    )
     args = parser.parse_args(argv)
     if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]*", args.version):
         parser.error("invalid release version")
@@ -331,13 +340,22 @@ def main(argv=None):
     with tempfile.TemporaryDirectory(prefix=".package-", dir=dist) as temporary:
         stage = Path(temporary) / name
         stage.mkdir()
-        build_runtime(stage, args.version)
+        if args.no_python:
+            stage_runtime(stage, args.version)
+        else:
+            build_runtime(stage, args.version)
         temporary_archive = Path(temporary) / archive.name
         with tarfile.open(temporary_archive, "w:gz") as release:
             release.add(stage, arcname=name)
         temporary_archive.replace(archive)
     checksum = digest(archive)
     archive.with_suffix(archive.suffix + ".sha256").write_text(checksum + "\n")
+    if args.no_python:
+        print(
+            f"Built {archive} without a Python runtime; no Homebrew formula "
+            "was written."
+        )
+        return
     url = (
         args.url
         or f"https://github.com/{REPOSITORY}/releases/download/{args.version}/{archive.name}"
