@@ -404,7 +404,7 @@ class ServerAccessTests(unittest.TestCase):
                 "/",
                 "/index.html?test=1",
                 "/favicon.ico",
-                *server.CHAT_ASSETS,
+                *server.CHAT_ASSET_ROUTES,
             ):
                 self.assertEqual(harness.request(method, path)[0], 404)
         default = self.harness()
@@ -422,10 +422,42 @@ class ServerAccessTests(unittest.TestCase):
         self.assertEqual((status, content_type), (200, "image/svg+xml"))
         self.assertTrue(ElementTree.fromstring(icon).tag.endswith("svg"))
 
+    def test_a_runtime_without_the_page_serves_and_hides_it(self):
+        """The page is read only when served: a runtime staged without the
+        files imports, starts, and answers 404 for the page when the web UI is
+        off, without ever touching a file."""
+        import server.server as server_module
+
+        with mock.patch.object(
+            server_module, "chat_pages", side_effect=FileNotFoundError
+        ) as pages:
+            harness = self.harness(webui=False)
+            for method in ("GET", "HEAD"):
+                for path in (
+                    "/",
+                    "/index.html?test=1",
+                    "/favicon.ico",
+                    *server_module.CHAT_ASSET_ROUTES,
+                ):
+                    self.assertEqual(harness.request(method, path)[0], 404)
+            self.assertEqual(harness.request("GET", "/health")[0], 200)
+            pages.assert_not_called()
+
+    def test_a_page_that_is_missing_when_served_answers_404(self):
+        """With the UI on and the files gone, the request is a 404, not a
+        traceback: the emee build ships the runtime without the page."""
+        import server.server as server_module
+
+        with mock.patch.object(
+            server_module, "chat_pages", side_effect=FileNotFoundError
+        ):
+            harness = self.harness(webui=True)
+            self.assertEqual(harness.request("GET", "/")[0], 404)
+
     def test_chat_assets_are_public_but_do_not_expose_other_files(self):
         harness = self.harness(api_key="test-server-key")
         mimes = {".js": "text/javascript", ".css": "text/css"}
-        for route in server.CHAT_ASSETS:
+        for route in server.CHAT_ASSET_ROUTES:
             with self.subTest(route=route):
                 status, content_type, payload = harness.request("GET", route)
                 self.assertEqual(status, 200)

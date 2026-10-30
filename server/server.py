@@ -563,7 +563,13 @@ class FrontendHandler(BaseHTTPRequestHandler):
                 # stays a runtime that starts.
                 self._safe_error(APIError(404, "not found", "not_found"))
             else:
-                html, assets, favicon = chat_pages()
+                try:
+                    html, assets, favicon = chat_pages()
+                except OSError:
+                    # A runtime staged without the page answers like one that
+                    # never had a web UI, rather than logging a traceback.
+                    self._safe_error(APIError(404, "not found", "not_found"))
+                    return
                 if path == "/favicon.ico":
                     self._send(200, favicon, "image/svg+xml")
                 elif path in assets:
