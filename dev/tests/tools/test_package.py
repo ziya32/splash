@@ -106,20 +106,61 @@ class PackageTests(unittest.TestCase):
                     ["--version", "nopy", "--macos-min", "26.4", "--no-python"]
                 )
             archive = root / "dist/splash-nopy-arm64-macos26.tar.gz"
+            checksum = root / "dist/splash-nopy-arm64-macos26.tar.gz.sha256"
+            assert checksum.read_text().strip() == package.digest(archive)
+            prefix = "splash-nopy-arm64-macos26/"
             with tarfile.open(archive) as release:
-                names = release.getnames()
+                names = set(release.getnames())
                 assert not any("/python/" in name or name.endswith("/python") for name in names)
-                assert "splash-nopy-arm64-macos26/install/launcher.py" in names
-                assert "splash-nopy-arm64-macos26/server/server.py" in names
-                assert "splash-nopy-arm64-macos26/engine/splash" in names
-                assert "splash-nopy-arm64-macos26/LICENSES" not in names
+                assert f"{prefix}install/launcher.py" in names
+                assert f"{prefix}server/server.py" in names
+                assert f"{prefix}engine/splash" in names
+                for name in package.LICENSE_FILES:
+                    assert f"{prefix}{name}" in names
+                for name in package.COMPLETION_FILES:
+                    assert f"{prefix}install/completions/{name}" in names
                 layout = json.loads(
-                    release.extractfile(
-                        "splash-nopy-arm64-macos26/release.json"
-                    ).read()
+                    release.extractfile(f"{prefix}release.json").read()
                 )
                 assert layout["version"] == "nopy"
             assert not (root / "dist/splash.rb").exists()
+
+    @unittest.skipUnless(shutil.which("make"), "make is needed")
+    def test_the_makefile_maps_package_python_to_the_flag(self):
+        explicit = subprocess.run(
+            ["make", "-n", "-C", str(package.ROOT), "package", "PACKAGE_PYTHON=0"],
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+        default = subprocess.run(
+            ["make", "-n", "-C", str(package.ROOT), "package"],
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+        self.assertIn("--no-python", explicit.stdout)
+        self.assertNotIn("--no-python", default.stdout)
+
+    def test_url_is_refused_with_no_python(self):
+        error = io.StringIO()
+        with (
+            contextlib.redirect_stderr(error),
+            self.assertRaises(SystemExit) as caught,
+        ):
+            package.main(
+                [
+                    "--version",
+                    "nopy",
+                    "--macos-min",
+                    "26.4",
+                    "--no-python",
+                    "--url",
+                    "https://example.test/splash.tar.gz",
+                ]
+            )
+        self.assertEqual(caught.exception.code, 2)
+        self.assertIn("--url has no meaning with --no-python", error.getvalue())
 
     def test_release_has_only_runtime_files_and_excludes_credentials(self):
         with tempfile.TemporaryDirectory() as temporary:

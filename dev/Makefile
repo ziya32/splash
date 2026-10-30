@@ -4,8 +4,13 @@ RELEASE_VERSION ?= $(shell git describe --tags --always)
 
 .PHONY: package package-bottle package-check
 # A release archive normally carries Splash's own Python. PACKAGE_PYTHON=0
-# stages the release layout only, for a bundle that supplies its interpreter.
+# stages the release layout only, for a bundle that supplies its interpreter;
+# pass it on the command line. An exported value is honored too, so set it
+# deliberately; any other value is refused.
 PACKAGE_PYTHON ?= 1
+ifneq ($(filter-out 0 1,$(PACKAGE_PYTHON)),)
+  $(error PACKAGE_PYTHON must be 0 or 1)
+endif
 PACKAGE_PYTHON_ARGS = $(if $(filter 0,$(PACKAGE_PYTHON)),--no-python,)
 package: install-environment all
 	$(PYTHON) dev/tools/package.py --version "$(RELEASE_VERSION)" \

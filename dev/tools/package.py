@@ -1,5 +1,11 @@
 #!/usr/bin/env python3
-"""Build the runtime-only macOS archive and its Homebrew formula."""
+"""Build the runtime-only macOS archive and its Homebrew formula.
+
+``--no-python`` stages the release layout without Splash's Python environment
+for a bundle that supplies its own interpreter. That archive has no formula and
+runs none of the Python self-tests; ``dev/tools/install.sh`` still requires the
+``python/`` directory, so this mode is not a Homebrew or tester release.
+"""
 
 import argparse
 import hashlib
@@ -199,6 +205,8 @@ def main(argv=None):
     args = parser.parse_args(argv)
     if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]*", args.version):
         parser.error("invalid release version")
+    if args.no_python and args.url:
+        parser.error("--url has no meaning with --no-python; no formula is written")
     dist = ROOT / "dist"
     dist.mkdir(exist_ok=True)
     name = f"splash-{args.version}-arm64-macos26"

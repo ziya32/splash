@@ -3700,6 +3700,18 @@ a temporary tap and remove their installation; they refuse to replace an
 existing Splash installation. The install check requires a poured bottle and
 runs the bundled launcher without a compiler or separate Python installation.
 
+A bundle that supplies its own interpreter builds the layout without Splash's
+Python:
+
+```sh
+make package RELEASE_VERSION=$VERSION PACKAGE_PYTHON=0
+```
+
+That archive holds no `python/`, writes no formula, and runs none of the Python
+self-tests. `package-bottle`, `package-check` and `dev/tools/install.sh` require
+`python/`, so they do not accept it. `PACKAGE_PYTHON` is a command-line build
+knob; an exported value also applies, so set it deliberately.
+
 To publish, tag the verified release commit in `incoai/splash` with the version
 (no `v` prefix), preserving existing history and tags. Create a GitHub Release
 with the runtime archive, its `.sha256` file and the bottle. Open a pull request
