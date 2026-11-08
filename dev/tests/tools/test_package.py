@@ -133,20 +133,33 @@ class PackageTests(unittest.TestCase):
 
     @unittest.skipUnless(shutil.which("make"), "make is needed")
     def test_the_makefile_maps_package_python_to_the_flag(self):
+        # A dev shell may export PACKAGE_PYTHON; the default leg must read the
+        # makefile's own default, not the caller's environment.
+        environment = {k: v for k, v in os.environ.items() if k != "PACKAGE_PYTHON"}
         explicit = subprocess.run(
             ["make", "-n", "-C", str(package.ROOT), "package", "PACKAGE_PYTHON=0"],
             capture_output=True,
             text=True,
             check=True,
+            env=environment,
         )
         default = subprocess.run(
             ["make", "-n", "-C", str(package.ROOT), "package"],
             capture_output=True,
             text=True,
             check=True,
+            env=environment,
+        )
+        refused = subprocess.run(
+            ["make", "-n", "-C", str(package.ROOT), "package", "PACKAGE_PYTHON=2"],
+            capture_output=True,
+            text=True,
+            env=environment,
         )
         self.assertIn("--no-python", explicit.stdout)
         self.assertNotIn("--no-python", default.stdout)
+        self.assertNotEqual(refused.returncode, 0)
+        self.assertIn("PACKAGE_PYTHON must be 0 or 1", refused.stderr)
 
     def test_url_is_refused_with_no_python(self):
         error = io.StringIO()
