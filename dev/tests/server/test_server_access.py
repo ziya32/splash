@@ -466,19 +466,21 @@ class ServerAccessTests(unittest.TestCase):
                 self.assertFalse((staged / "server" / name).exists())
             script = textwrap.dedent(
                 """
+                import io
                 import json
                 import os
                 import sys
+                from pathlib import Path
 
                 page_reads = []
 
                 def record_page_read(event, args):
                     if event != "open":
                         return
-                    path = args[0]
-                    if not isinstance(path, (str, bytes)):
+                    try:
+                        path = os.fsdecode(args[0])
+                    except TypeError:
                         return
-                    path = os.fsdecode(path)
                     if os.path.basename(path) in ("chat.html", "favicon.svg"):
                         page_reads.append(path)
                     elif "chat-assets" in path.split(os.sep):
@@ -500,11 +502,25 @@ class ServerAccessTests(unittest.TestCase):
                     status = harness.request("GET", "/")[0]
                 finally:
                     harness.close()
+
+                # Positive control: the staged page file is absent, so this
+                # read raises, but the hook records the attempt before the OS
+                # open. FileIO receives the path object itself, so this also
+                # proves the filter decodes path-like arguments.
+                baseline = len(page_reads)
+                try:
+                    io.FileIO(Path("server", "chat.html"), "rb")
+                except FileNotFoundError:
+                    pass
+                control = len(page_reads) == baseline + 1
+                del page_reads[baseline:]
+
                 print(
                     json.dumps(
                         {
                             "module": server_module.__file__,
                             "status": status,
+                            "control": control,
                             "page_reads": page_reads,
                         }
                     )
@@ -529,6 +545,7 @@ class ServerAccessTests(unittest.TestCase):
                 (staged / "server" / "server.py").resolve(),
             )
             self.assertEqual(outcome["status"], 404)
+            self.assertTrue(outcome["control"], "the audit hook missed a page open")
             self.assertEqual(outcome["page_reads"], [])
 
     def test_a_page_that_is_missing_when_served_answers_404(self):
