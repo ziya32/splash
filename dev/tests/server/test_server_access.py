@@ -3,8 +3,14 @@ import http.client
 import io
 import json
 import os
+import shutil
+import subprocess
+import sys
+import tempfile
+import textwrap
 import time
 import unittest
+from pathlib import Path
 from unittest import mock
 from xml.etree import ElementTree
 
@@ -442,6 +448,69 @@ class ServerAccessTests(unittest.TestCase):
                     self.assertEqual(harness.request(method, path)[0], 404)
             self.assertEqual(harness.request("GET", "/health")[0], 200)
             pages.assert_not_called()
+
+    def test_a_runtime_staged_without_the_page_imports_and_answers_404(self):
+        """Importing server.server reads no page file: a runtime staged without
+        chat.html, favicon.svg and chat-assets imports, and GET / with the web
+        UI off answers 404 without reading one."""
+        with tempfile.TemporaryDirectory() as temporary:
+            staged = Path(temporary)
+            shutil.copytree(
+                server.ROOT / "server",
+                staged / "server",
+                ignore=shutil.ignore_patterns(
+                    "chat.html", "favicon.svg", "chat-assets", "__pycache__"
+                ),
+            )
+            for name in ("chat.html", "favicon.svg", "chat-assets"):
+                self.assertFalse((staged / "server" / name).exists())
+            script = textwrap.dedent(
+                """
+                import json
+
+                from server import server as server_module
+
+                # The staged runtime holds no page file: this import read none,
+                # and the page route serves 404 from the web UI flag alone.
+
+                from dev.tests.server_fixtures import FakeRuntime, Harness
+
+                harness = Harness(FakeRuntime(), webui=False)
+                try:
+                    status = harness.request("GET", "/")[0]
+                    reads = server_module.chat_pages.cache_info().currsize
+                finally:
+                    harness.close()
+                print(
+                    json.dumps(
+                        {
+                            "module": server_module.__file__,
+                            "status": status,
+                            "reads": reads,
+                        }
+                    )
+                )
+                """
+            )
+            result = subprocess.run(
+                [sys.executable, "-c", script],
+                cwd=staged,
+                capture_output=True,
+                text=True,
+                timeout=120,
+                env={
+                    **os.environ,
+                    "PYTHONPATH": os.pathsep.join((str(staged), str(server.ROOT))),
+                },
+            )
+            self.assertEqual(result.returncode, 0, result.stderr)
+            outcome = json.loads(result.stdout)
+            self.assertEqual(
+                Path(outcome["module"]).resolve(),
+                (staged / "server" / "server.py").resolve(),
+            )
+            self.assertEqual(outcome["status"], 404)
+            self.assertEqual(outcome["reads"], 0)
 
     def test_a_page_that_is_missing_when_served_answers_404(self):
         """With the UI on and the files gone, the request is a 404, not a
