@@ -92,8 +92,9 @@ SSE_KEEPALIVE_SECONDS = 2.0
 ROOT = Path(__file__).parents[1]
 # The browser page and its assets are read on first use, never at import: a
 # deployment that serves no web UI (``--no-webui``) has no reason to hold the
-# files open, and a runtime built without them must still start. The route names
-# are constants so the route table and the public-path check read no file.
+# files open, and a runtime built without them must still start. The route
+# names only build ROUTES; whether a route answers without the key is its
+# Route.public.
 CHAT_ASSET_NAMES = (
     "markdown-it-15.0.2.min.js",
     "highlight-11.12.0.min.js",
