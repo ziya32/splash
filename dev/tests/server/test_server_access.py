@@ -467,6 +467,26 @@ class ServerAccessTests(unittest.TestCase):
             script = textwrap.dedent(
                 """
                 import json
+                import os
+                import sys
+
+                page_reads = []
+
+                def record_page_read(event, args):
+                    if event != "open":
+                        return
+                    path = args[0]
+                    if not isinstance(path, (str, bytes)):
+                        return
+                    path = os.fsdecode(path)
+                    if os.path.basename(path) in ("chat.html", "favicon.svg"):
+                        page_reads.append(path)
+                    elif "chat-assets" in path.split(os.sep):
+                        page_reads.append(path)
+
+                # Recorded before the import, so a read that catches its own
+                # missing file still shows up as the page being read.
+                sys.addaudithook(record_page_read)
 
                 from server import server as server_module
 
@@ -478,7 +498,6 @@ class ServerAccessTests(unittest.TestCase):
                 harness = Harness(FakeRuntime(), webui=False)
                 try:
                     status = harness.request("GET", "/")[0]
-                    reads = server_module.chat_pages.cache_info().currsize
                 finally:
                     harness.close()
                 print(
@@ -486,7 +505,7 @@ class ServerAccessTests(unittest.TestCase):
                         {
                             "module": server_module.__file__,
                             "status": status,
-                            "reads": reads,
+                            "page_reads": page_reads,
                         }
                     )
                 )
@@ -510,7 +529,7 @@ class ServerAccessTests(unittest.TestCase):
                 (staged / "server" / "server.py").resolve(),
             )
             self.assertEqual(outcome["status"], 404)
-            self.assertEqual(outcome["reads"], 0)
+            self.assertEqual(outcome["page_reads"], [])
 
     def test_a_page_that_is_missing_when_served_answers_404(self):
         """With the UI on and the files gone, the request is a 404, not a
