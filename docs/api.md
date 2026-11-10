@@ -68,6 +68,14 @@ Completions, text completions, Responses and Messages share these fields:
   makes it compute its whole prompt itself, except its images' encoded rows,
   which it may take from one cache the runtime keeps for every request, keyed
   by the image and not the salt.
+- `replay_tail_tokens`: a non-negative integer, 0 or absent by default. A
+  chat-shaped request (Chat Completions, Responses, Messages) publishes its
+  replay state at the last whole 32-token page before its last
+  `replay_tail_tokens` prompt tokens instead of before its generation prompt,
+  so a warm-up can save an opening's page for a later turn to resume from. It
+  must leave a prompt page and start at or before the generation prompt;
+  another value returns 400 and names the field. A raw text completion has no
+  generation prompt and refuses a non-zero value.
 
 Chat Completions also takes `messages`, `tools`, `tool_choice` and
 `parallel_tool_calls` ([tool calls](#tool-calls)), `response_format`

@@ -9,7 +9,7 @@ from dataclasses import replace
 from server import protocol as wire
 
 _HEADER = struct.Struct("<4sHHQ")
-_REQUEST = struct.Struct("<QBBQQIIIffIffffQIIIQQIIII")
+_REQUEST = struct.Struct("<QBBQQIIIffIffffQIIIQQIIIII")
 _IMAGE_SPAN = struct.Struct("<IIIIQQ")
 _MASK_RESPONSE = struct.Struct("<QQII")
 _ID = struct.Struct("<Q")
@@ -189,6 +189,7 @@ def _decode_request(payload: bytes) -> wire.RequestFrame:
         thinking_end_count,
         thinking_also_ends,
         head_tokens,
+        replay_tail_tokens,
     ) = _REQUEST.unpack_from(payload)
     offset = _REQUEST.size
     prompt = _words(payload, offset, prompt_count)
@@ -225,6 +226,7 @@ def _decode_request(payload: bytes) -> wire.RequestFrame:
         if thinking_tokens == 0xFFFFFFFF
         else wire.ThinkingBudget(thinking_tokens, thinking_end, thinking_also_ends),
         head_tokens,
+        replay_tail_tokens,
     )
 
 
