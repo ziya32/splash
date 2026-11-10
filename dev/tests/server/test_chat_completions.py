@@ -10,6 +10,7 @@ from dev.tests.server_fixtures import (
     openai_client,
     responses_body,
 )
+from server import protocol as p
 from server.chat_format import QWEN
 
 
@@ -144,6 +145,48 @@ class ChatCompletionTests(HarnessTestCase):
         self.assertEqual(response["choices"][0]["finish_reason"], "stop")
         self.assertEqual(response["usage"]["completion_tokens"], 2)
         self.assertEqual((runtime.stop_count, runtime.cancel_count), (1, 0))
+
+    def test_replay_tail_is_validated_and_reaches_the_engine(self):
+        # The field names itself when malformed, and a chat-shaped request
+        # whose real prompt leaves a page forwards it to the engine.
+        short = self.harness(FakeRuntime(Plan([[1]])))
+        status, _, payload = short.request(
+            "POST", "/v1/chat/completions", chat_body(replay_tail_tokens="ten")
+        )
+        self.assertEqual(status, 400)
+        self.assertIn(b"replay_tail_tokens", payload)
+        status, _, payload = short.request(
+            "POST", "/v1/chat/completions", chat_body(replay_tail_tokens=10)
+        )
+        self.assertEqual(status, 400)
+        self.assertIn(b"replay_tail_tokens", payload)
+
+        # The shared chat path carries a valid field into its job; a raw text
+        # completion has no generation prompt and refuses it.
+        runtime = FakeRuntime(Plan([[1]]))
+        long = self.harness(runtime, max_context=4096)
+        options = long.app._generation_options(chat_body(replay_tail_tokens=10))
+        job = long.app._generation_job(
+            options,
+            list(range(100)),
+            16,
+            1.0,
+            p.RequestFlag(0),
+            generation_prompt_tokens=7,
+        )
+        self.assertEqual(job.replay_tail_tokens, 10)
+        status, _, payload = long.request(
+            "POST",
+            "/v1/completions",
+            {
+                "model": "test-model",
+                "prompt": "hi",
+                "max_tokens": 1,
+                "replay_tail_tokens": 10,
+            },
+        )
+        self.assertEqual(status, 400)
+        self.assertIn(b"replay_tail_tokens", payload)
 
     def test_usage_counts_only_tokens_before_the_thinking_delimiter(self):
         # The fake vocabulary's </think> is token 26.

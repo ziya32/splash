@@ -602,7 +602,7 @@ uint32_t Engine::reserveCaptures(Request &active, const BatchItem &item,
   const std::vector<Request::StateBoundary> &boundaries = active.stateBoundaries;
   const auto stateClass = [&](size_t index) {
     return boundaries[index].disposable                               ? StateClass::Checkpoint
-           : boundaries[index].tokens == promptReplayBoundary(active) ? StateClass::InUse
+           : boundaries[index].tokens == replayPublicationBoundary(active) ? StateClass::InUse
                                                                       : StateClass::Ordinary;
   };
   // Takes the buffers of the state at boundaries[index]; false when refused.

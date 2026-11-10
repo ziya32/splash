@@ -708,6 +708,64 @@ void testReplayStateEndsBeforeTheGenerationPrompt() {
           "a generation prompt within the first page left a replay state");
 }
 
+// A request that names a replay tail publishes the page before it, not the
+// generation prompt's page; an identical retry resumes from that page.
+void testRequestedReplayTailPublishesItsPage() {
+  test::EngineHarness h({.pages = 32});
+  engine::Cache &resources = h.cache;
+  Events &events = h.events;
+  engine::Engine &engine = h.engine;
+  std::vector<uint32_t> prompt(100);
+  std::iota(prompt.begin(), prompt.end(), 1);
+  EngineRequest first = request(1, prompt);
+  first.generationPromptTokens = 7;
+  first.replayTailTokens = 37;
+  engine.submit(std::move(first));
+  h.runUntilIdle();
+  require(resources.lookup(prompt, {}).resumeBoundary() == 32,
+          "the requested replay tail did not publish its page");
+  require(engine.snapshot().replayStatePublications == 1 &&
+              engine.snapshot().junctionMaterializations == 0 &&
+              engine.snapshot().resources.stateCache.entries == 1,
+          "the requested page was not the one replay state");
+  EngineRequest retry = request(2, prompt);
+  retry.generationPromptTokens = 7;
+  retry.replayTailTokens = 37;
+  engine.submit(std::move(retry));
+  h.runUntilIdle();
+  require(events.starts == std::vector<uint32_t>{0, 32},
+          "the retry did not resume from the requested page");
+  EngineRequest pageTooSmall = request(3, std::vector<uint32_t>(64, 9));
+  pageTooSmall.replayTailTokens = 64;
+  rejects([&] { engine.submit(std::move(pageTooSmall)); },
+          "replay tail", "an out-of-range replay tail was accepted");
+}
+
+// A requested page a request resumed at or past is ignored in favour of the
+// generation prompt's page: the request keeps the state it already restored.
+void testRequestedBoundaryIsClampedToTheResumedState() {
+  test::EngineHarness h({.pages = 32});
+  engine::Cache &resources = h.cache;
+  engine::Engine &engine = h.engine;
+  std::vector<uint32_t> prompt(100);
+  std::iota(prompt.begin(), prompt.end(), 1);
+  EngineRequest first = request(1, prompt);
+  first.generationPromptTokens = 7;
+  engine.submit(std::move(first));
+  h.runUntilIdle();
+  require(resources.lookup(prompt, {}).resumeBoundary() == 64,
+          "the default replay page was not published");
+  EngineRequest second = request(2, prompt);
+  second.generationPromptTokens = 7;
+  second.replayTailTokens = 37;
+  engine.submit(std::move(second));
+  h.runUntilIdle();
+  require(resources.lookup(prompt, {}).resumeBoundary() == 64 &&
+              engine.snapshot().resources.stateCache.entries == 1 &&
+              engine.snapshot().replayStatePublications == 1,
+          "a requested page below the resumed state replaced it");
+}
+
 // A next turn that renders the generation prompt differently diverges inside
 // it (at N-4, as Qwen3.6 without reasoning does). Only a replay state before
 // the generation prompt serves it.
@@ -1981,6 +2039,8 @@ std::span<const test::TestCase> requestsTests() {
       {"testColdPublishesReplayStateAndRebuildsALostOne", testColdPublishesReplayStateAndRebuildsALostOne},
       {"testConcurrentDuplicateStateIsCapturedOnce", testConcurrentDuplicateStateIsCapturedOnce},
       {"testReplayStateEndsBeforeTheGenerationPrompt", testReplayStateEndsBeforeTheGenerationPrompt},
+      {"testRequestedReplayTailPublishesItsPage", testRequestedReplayTailPublishesItsPage},
+      {"testRequestedBoundaryIsClampedToTheResumedState", testRequestedBoundaryIsClampedToTheResumedState},
       {"testFollowUpResumesBeforeTheGenerationPrompt", testFollowUpResumesBeforeTheGenerationPrompt},
       {"testRetryPublishesNoStateInsideTheGenerationPrompt", testRetryPublishesNoStateInsideTheGenerationPrompt},
       {"testSharedJunctionEndsBeforeTheGenerationPrompt", testSharedJunctionEndsBeforeTheGenerationPrompt},

@@ -71,6 +71,9 @@ struct EngineRequest final {
   // reusable state is kept before them. Zero when unknown; it must leave at
   // least one prompt token.
   uint32_t generationPromptTokens = 0;
+  // When non-zero, publish the replay state at the last whole page before the
+  // last this many prompt tokens. Zero uses generationPromptTokens's page.
+  uint32_t replayTailTokens = 0;
   std::vector<ImageSpan> images;
   std::vector<uint8_t> imagePixels;
   uint32_t maxNewTokens = 0;

@@ -73,7 +73,8 @@ constexpr size_t generationPrompt = scoreCount + 4;
 constexpr size_t flags = generationPrompt + 4;
 constexpr size_t cacheSalt = flags + 4;
 constexpr size_t thinkingBudget = cacheSalt + 16;
-static_assert(thinkingBudget + 12 == kRequestFixedBytes);
+constexpr size_t replayTail = thinkingBudget + 12;
+static_assert(replayTail + 4 == kRequestFixedBytes);
 } // namespace request_offset
 
 uint32_t loadU32(const std::vector<uint8_t> &bytes, size_t offset) {

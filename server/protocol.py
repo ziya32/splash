@@ -16,7 +16,7 @@ from dataclasses import dataclass, fields
 from enum import IntEnum, IntFlag
 from typing import TypeAlias
 
-PROTOCOL_VERSION = 12
+PROTOCOL_VERSION = 13
 # A frame is its header, the magic, the protocol version, the frame type and
 # the payload length, then the payload.
 FRAME_HEADER_BYTES = 16
@@ -47,7 +47,7 @@ _MAGIC = b"SPLH"
 _HEADER = struct.Struct("<4sHHQ")
 # Replay can update the integer deadlines without decoding sampling floats.
 _REQUEST_HEAD = struct.Struct("<QBBQQ")
-_REQUEST = struct.Struct(_REQUEST_HEAD.format + "IIIffIffffQIIIQQIII")
+_REQUEST = struct.Struct(_REQUEST_HEAD.format + "IIIffIffffQIIIQQIIII")
 _IMAGE_SPAN = struct.Struct("<IIIIQQ")
 # Cancel and Stop: one request id.
 _REQUEST_END = struct.Struct("<Q")
@@ -72,7 +72,7 @@ assert (
     and sys.byteorder == "little"
 )
 assert _HEADER.size == FRAME_HEADER_BYTES
-assert _REQUEST.size == 114
+assert _REQUEST.size == 118
 assert _IMAGE_SPAN.size == 32
 assert _READY.size == 21
 assert _START.size == 16
@@ -297,6 +297,10 @@ class RequestFrame:
     # Only a request that generates inside a thinking block has one; a score
     # request never does.
     thinking_budget: ThinkingBudget | None = None
+    # When non-zero, publish the replay state at the last whole page before the
+    # last this many prompt tokens, instead of before the generation prompt.
+    # Zero takes the generation prompt's page.
+    replay_tail_tokens: int = 0
 
 
 @dataclass(slots=True, frozen=True)
@@ -803,6 +807,16 @@ def _validated_request(
         generation = _u32(request.generation_prompt_tokens, "generation prompt tokens")
         if generation >= len(prompt):
             raise ValueError("generation prompt must leave a prompt token")
+        replay_tail = _u32(request.replay_tail_tokens, "replay tail tokens")
+        if replay_tail and (
+            replay_tail >= len(prompt)
+            or replay_tail < generation
+            or len(prompt) - replay_tail < 32
+        ):
+            raise ValueError(
+                "replay_tail_tokens must leave a prompt page and start at or "
+                "before the generation prompt"
+            )
         if scores and (request.image_spans or request.image_pixels):
             raise ValueError("score requests are text-only")
         if scores and (
@@ -941,6 +955,7 @@ def _request_frame(request: RequestFrame) -> bytearray:
                 request.thinking_budget.also_ends,
             )
         ),
+        request.replay_tail_tokens,
     )
     for index, span in enumerate(request.image_spans):
         _IMAGE_SPAN.pack_into(

@@ -39,6 +39,7 @@ REQUEST_FIELDS = (
     "thinking_tokens",
     "thinking_end_count",
     "thinking_also_ends",
+    "replay_tail_tokens",
 )
 assert len(REQUEST_FIELDS) == len(p._REQUEST.format) - 1
 OFFSET = dict(
@@ -517,6 +518,7 @@ class ProtocolPythonTests(unittest.TestCase):
                 request.thinking_budget.tokens,
                 len(request.thinking_budget.end),
                 request.thinking_budget.also_ends,
+                request.replay_tail_tokens,
             )
             + struct.pack(f"<{len(request.prompt_tokens)}I", *request.prompt_tokens)
             + struct.pack(p._IMAGE_SPAN.format, *astuple(span))
@@ -740,6 +742,12 @@ class ProtocolPythonTests(unittest.TestCase):
         )
         self.assertEqual(
             struct.unpack_from(
+                "<I", wire, p.FRAME_HEADER_BYTES + OFFSET["replay_tail_tokens"]
+            )[0],
+            request.replay_tail_tokens,
+        )
+        self.assertEqual(
+            struct.unpack_from(
                 "<5I", wire, p.FRAME_HEADER_BYTES + p.REQUEST_FIXED_BYTES
             ),
             request.prompt_tokens,
@@ -826,6 +834,27 @@ class ProtocolPythonTests(unittest.TestCase):
                     ),
                 )
                 self.assertEqual(issue.request_id, request.request_id)
+
+    def test_replay_tail_must_leave_a_page_and_start_at_the_generation_prompt(self):
+        request = replace(
+            example_request(),
+            prompt_tokens=(7,) + tuple(range(40)),
+            generation_prompt_tokens=7,
+        )
+        for tail in (1, 40, 41):
+            with self.subTest(tail=tail):
+                issue = self.assert_protocol_error(
+                    p.FailureClass.REQUEST_ERROR,
+                    p.IssueCode.INVALID_COUNT,
+                    lambda tail=tail: p.serialize_message(
+                        replace(request, replay_tail_tokens=tail)
+                    ),
+                )
+                self.assertEqual(issue.request_id, request.request_id)
+        for tail in (0, 7, 9):
+            with self.subTest(tail=tail):
+                valid = replace(request, replay_tail_tokens=tail)
+                self.assertEqual(decode_client(p.serialize_message(valid)), valid)
 
     def test_request_flags_follow_the_generation_prompt(self):
         request = example_ignore_eos_request()

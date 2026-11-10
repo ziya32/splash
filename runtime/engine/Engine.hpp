@@ -397,6 +397,10 @@ private:
     uint32_t promptTokens = 0;
     uint32_t reportedPromptTokens = 0;
     uint32_t replayTokens = 0;
+    // The replay state this request publishes: the requested tail's page, or
+    // the generation prompt's page when it requests none or the requested page
+    // is at or below the state it resumed from.
+    uint32_t replayPublicationTokens = 0;
     // The blocks it restored or published in any residency end at this
     // token. A resume after a suspension counts the blocks it restores past
     // them as KV another request computed (completeAdmission). The blocks
@@ -707,6 +711,13 @@ private:
   // replayStateBoundary while the lane replays only its prompt.
   [[nodiscard]] static uint32_t
   promptReplayBoundary(const Request &request) noexcept;
+  // The page a request's replayTailTokens names, or 0 when it names none.
+  [[nodiscard]] static uint32_t
+  requestedReplayBoundary(const Request &request) noexcept;
+  // The replay state the request publishes: its requested page, or the
+  // generation prompt's page when it requests none or resumes at or past it.
+  [[nodiscard]] static uint32_t
+  replayPublicationBoundary(const Request &request) noexcept;
   [[nodiscard]] static uint32_t sharedPrefillBoundary(const Request &left,
                                                       const Request &right);
   // An unstarted request waits while a resident producer has yet to publish

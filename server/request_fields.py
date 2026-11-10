@@ -48,3 +48,14 @@ def cache_salt(body):
         salt.encode("utf-8", "surrogatepass"), digest_size=16, person=b"splash-salt"
     ).digest()
     return int.from_bytes(digest, "little")
+
+
+def replay_tail_tokens(body):
+    """The request's replay tail: publish its replay state at the last whole
+    page before the last this many prompt tokens. Zero when absent or null."""
+    value = body.get("replay_tail_tokens")
+    if value is None:
+        return 0
+    if not isinstance(value, int) or isinstance(value, bool) or value < 0:
+        raise APIError(400, "replay_tail_tokens must be a non-negative integer")
+    return value

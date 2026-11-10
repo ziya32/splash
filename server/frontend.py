@@ -163,6 +163,9 @@ class GenerationOptions:
     # The thinking tokens of a request that thinks, after which its thinking
     # closes; None for no cap.
     thinking_token_budget: int | None
+    # When non-zero, the replay state publishes at the last whole page before
+    # the last this many prompt tokens instead of before the generation prompt.
+    replay_tail_tokens: int
 
 
 class Frontend:
@@ -1009,6 +1012,7 @@ class Frontend:
             request_fields.priority(body),
             request_fields.cache_salt(body),
             budget,
+            request_fields.replay_tail_tokens(body),
         )
 
     def _output_budget(self, requested, prompt_tokens, field):
@@ -1029,6 +1033,21 @@ class Frontend:
         """The job for a prepared prompt, with the endpoint's own fields: its
         flags are the request's own (request_fields.generation) and those its
         generation options set."""
+        replay_tail = options.replay_tail_tokens
+        if replay_tail:
+            generation_prompt = fields.get("generation_prompt_tokens", 0)
+            if (
+                not generation_prompt
+                or replay_tail >= len(prompt_tokens)
+                or replay_tail < generation_prompt
+                or len(prompt_tokens) - replay_tail < 32
+            ):
+                raise APIError(
+                    400,
+                    "replay_tail_tokens must leave a prompt page and start at "
+                    "or before the generation prompt",
+                )
+            fields["replay_tail_tokens"] = replay_tail
         if options.ignore_eos:
             flags |= wire.RequestFlag.IGNORE_END_OF_SEQUENCE
         return Job(

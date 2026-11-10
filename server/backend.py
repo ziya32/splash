@@ -161,6 +161,9 @@ class Job:
     # Trailing prompt tokens of the chat template's generation prompt; zero
     # when unknown.
     generation_prompt_tokens: int = 0
+    # When non-zero, publish the replay state at the last whole page before the
+    # last this many prompt tokens instead of before the generation prompt.
+    replay_tail_tokens: int = 0
     flags: wire.RequestFlag = wire.RequestFlag(0)
     # The request asked for more output than the context leaves, and
     # max_new_tokens was lowered to what it leaves.
@@ -762,6 +765,7 @@ class NativeBackend:
             image_pixels=job.image_pixels,
             score_tokens=job.score_tokens,
             generation_prompt_tokens=job.generation_prompt_tokens,
+            replay_tail_tokens=job.replay_tail_tokens,
             flags=job.flags,
             cache_salt=job.cache_salt,
             thinking_budget=self._thinking_budget(job),

@@ -248,6 +248,35 @@ void testGenerationPromptBoundsTheReplayState() {
           "the replay state did not end before the generation prompt");
 }
 
+// A requested replay tail crosses the wire: its page is the state an
+// identical retry resumes from, before the generation prompt's page.
+void testRequestedReplayTailCrossesTheWire() {
+  engine::NativeLoopConfig config;
+  config.engine.maxContext = 1024;
+  LoopFixture fixture(config);
+  engine::NativeRuntime &loop = fixture.loop;
+  fixture.clockStep = 0.25;
+  loop.announceReady(protocol::peer::kTestReady);
+  for (uint64_t id : {1, 2}) {
+    auto input = request(id);
+    input.promptTokens.resize(100);
+    for (uint32_t i = 0; i < input.promptTokens.size(); ++i)
+      input.promptTokens[i] = i + 1;
+    input.generationPromptTokens = 7;
+    input.replayTailTokens = 37;
+    require(loop.receive(protocol::peer::serialize(input)),
+            "replay tail request wire failed");
+    runUntilIdle(loop);
+  }
+  std::vector<uint32_t> matched;
+  for (const auto &message : fixture.events()) {
+    if (const auto *start = std::get_if<protocol::StartEvent>(&message))
+      matched.push_back(start->matchedPromptTokens);
+  }
+  require(matched == std::vector<uint32_t>{0, 32},
+          "the requested replay tail did not bound the replay state");
+}
+
 // A request's cache salt reaches the engine: the same prompt under another
 // salt starts cold and under its own salt resumes. A Done event reports the
 // tokens a request read from blocks another request computed, and a salt no
@@ -1299,6 +1328,7 @@ std::span<const test::TestCase> wireTests() {
       {"testWireLifecycleAndCacheHit", testWireLifecycleAndCacheHit},
       {"testSnapshotReportsLiveRequests", testSnapshotReportsLiveRequests},
       {"testGenerationPromptBoundsTheReplayState", testGenerationPromptBoundsTheReplayState},
+      {"testRequestedReplayTailCrossesTheWire", testRequestedReplayTailCrossesTheWire},
       {"testCacheSaltAndDeduplicationCrossTheWire", testCacheSaltAndDeduplicationCrossTheWire},
       {"testRequestFlagsReachTheModel", testRequestFlagsReachTheModel},
       {"testSamplingReachesTheModel", testSamplingReachesTheModel},
