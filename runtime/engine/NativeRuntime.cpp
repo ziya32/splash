@@ -223,6 +223,7 @@ bool NativeRuntime::handleRequest(protocol::RequestFrame &request) {
     engineRequest.prompt = std::move(request.promptTokens);
     engineRequest.generationPromptTokens = request.generationPromptTokens;
     engineRequest.headTokens = request.headTokens;
+    engineRequest.replayTailTokens = request.replayTailTokens;
     engineRequest.images = std::move(request.imageSpans);
     engineRequest.imagePixels = std::move(request.imagePixels);
     engineRequest.maxNewTokens = request.logicalMaxOutputTokens;

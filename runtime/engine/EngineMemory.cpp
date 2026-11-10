@@ -695,9 +695,9 @@ uint32_t Engine::reserveCaptures(Request &active, const BatchItem &item,
   const uint32_t end = awaitedBoundary(active, start + item.tokenCount);
   const std::vector<Request::StateBoundary> &boundaries = active.stateBoundaries;
   const auto stateClass = [&](size_t index) {
-    return boundaries[index].disposable                               ? StateClass::Checkpoint
-           : boundaries[index].tokens == promptReplayBoundary(active) ? StateClass::InUse
-                                                                      : StateClass::Ordinary;
+    return boundaries[index].disposable                                    ? StateClass::Checkpoint
+           : boundaries[index].tokens == replayPublicationBoundary(active) ? StateClass::InUse
+                                                                           : StateClass::Ordinary;
   };
   // Takes the buffers of the state at boundaries[index]; false when refused.
   // Only the command's first state follows the lane's checkpoint, its

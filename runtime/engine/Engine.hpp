@@ -410,6 +410,10 @@ private:
     uint32_t promptTokens = 0;
     uint32_t reportedPromptTokens = 0;
     uint32_t replayTokens = 0;
+    // The replay state this request publishes: the requested tail's page, or
+    // the generation prompt's page when it requests none or the requested page
+    // is at or below the state it resumed from.
+    uint32_t replayPublicationTokens = 0;
     // The blocks it restored or published in any residency end at this
     // token. A resume after a suspension counts the blocks it restores past
     // them as KV another request computed (completeAdmission). The blocks
@@ -776,13 +780,20 @@ private:
   // replayStateBoundary while the lane replays only its prompt.
   [[nodiscard]] static uint32_t
   promptReplayBoundary(const Request &request) noexcept;
+  // The page a request's replayTailTokens names, or 0 when it names none.
+  [[nodiscard]] static uint32_t
+  requestedReplayBoundary(const Request &request) noexcept;
+  // The replay state the request publishes: its requested page, or the
+  // generation prompt's page when it requests none or resumes at or past it.
+  [[nodiscard]] static uint32_t
+  replayPublicationBoundary(const Request &request) noexcept;
   // Where the lane keeps its head's state: the last whole page of the
   // prompt's head (EngineRequest::headTokens), zero without one.
   [[nodiscard]] static uint32_t headBoundary(const Request &request) noexcept;
   // The states whose publication keeps the lane's checkpoint cached, as
-  // disposable as any, rather than retiring it: the prompt's replay point
-  // and the head's. A later request that shares the prompt up to the
-  // checkpoint but not up to such a state resumes there: a conversation's
+  // disposable as any, rather than retiring it: the replay state the request
+  // publishes and the head's. A later request that shares the prompt up to
+  // the checkpoint but not up to such a state resumes there: a conversation's
   // head often ends in text of its own, as an agent's environment block,
   // inside the head's last page.
   [[nodiscard]] static bool keepsCheckpoint(const Request &request,

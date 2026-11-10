@@ -139,6 +139,14 @@ void Engine::submit(EngineRequest value) {
   requestState.exactTokens = std::move(value.prompt);
   requestState.promptTokens = static_cast<uint32_t>(requestState.exactTokens.size());
   requestState.replayTokens = requestState.promptTokens;
+  if (value.replayTailTokens != 0 &&
+      (value.replayTailTokens >= requestState.promptTokens ||
+       value.replayTailTokens < value.generationPromptTokens ||
+       requestState.promptTokens - value.replayTailTokens < KvCache::pageTokens)) {
+    throw std::invalid_argument(
+        "replay tail must leave a prompt page and start at or before the "
+        "generation prompt");
+  }
   requestState.outputLimit = value.maxNewTokens;
   requestState.request = std::move(value);
   const Request &stored =
@@ -868,11 +876,26 @@ bool Engine::admitQueued(double now) {
   return false;
 }
 
+uint32_t Engine::requestedReplayBoundary(const Request &active) noexcept {
+  const uint32_t tail = active.request.replayTailTokens;
+  if (tail == 0 || tail >= active.promptTokens ||
+      tail < active.request.generationPromptTokens)
+    return 0;
+  return (active.promptTokens - tail) / KvCache::pageTokens *
+         KvCache::pageTokens;
+}
+
+uint32_t Engine::replayPublicationBoundary(const Request &active) noexcept {
+  return active.replayPublicationTokens != 0
+             ? active.replayPublicationTokens
+             : promptReplayBoundary(active);
+}
+
 uint32_t Engine::replayStateBoundary(const Request &active) noexcept {
   // A later request may not share the generation prompt; generated history
   // that a resumed lane replays is its own: the state there is a checkpoint.
   if (active.replayTokens == active.promptTokens)
-    return promptReplayBoundary(active);
+    return replayPublicationBoundary(active);
   return (active.replayTokens - 1) / KvCache::pageTokens * KvCache::pageTokens;
 }
 
@@ -887,7 +910,8 @@ uint32_t Engine::headBoundary(const Request &active) noexcept {
 
 bool Engine::keepsCheckpoint(const Request &active, Request::StateBoundary boundary) noexcept {
   return !boundary.disposable &&
-         (boundary.tokens == promptReplayBoundary(active) || boundary.tokens == headBoundary(active));
+         (boundary.tokens == replayPublicationBoundary(active) ||
+          boundary.tokens == headBoundary(active));
 }
 
 uint32_t Engine::sharedPrefillBoundary(const Request &left,
@@ -1173,7 +1197,7 @@ void Engine::completeAdmission(Request &active, CacheLookup &lookup,
     // cache slot leaves it on disk. Other restored progress points, the end of
     // a resumed lane's generated history among them, retain their rolling
     // lifetime.
-    if (resumeBoundary == promptReplayBoundary(active)) {
+    if (resumeBoundary == replayPublicationBoundary(active)) {
       if (active.latestCheckpoint) {
         if (cache_.reuseStoredState(active.latestCheckpoint.kvBlock))
           ++counters_.deduplicatedStatePublications;
@@ -1284,6 +1308,12 @@ DraftContextPlan Engine::configureDraftStatePlan(Request &active,
   if (!active.stateBoundaries.empty() || active.stateBoundaryCursor != 0) {
     throw std::logic_error("request already has a composite-state plan");
   }
+  const uint32_t requested = requestedReplayBoundary(active);
+  const bool hasRequestedBoundary = requested > stateBoundary;
+  const uint32_t publication = hasRequestedBoundary
+                                   ? requested
+                                   : promptReplayBoundary(active);
+  active.replayPublicationTokens = publication;
   const uint32_t latestReplayBoundary = replayStateBoundary(active);
   // Plan draft windows before prefill; arbitrary chunk ends do not carry a
   // complete draft state, the point the lane resumes from does. Progress
@@ -1300,10 +1330,14 @@ DraftContextPlan Engine::configureDraftStatePlan(Request &active,
   if (const uint32_t head = headBoundary(active); head >= stateBoundary + kMinimumJunctionGain)
     addStateBoundary(active, stateBoundary, head, false, true);
   addStateBoundary(active, stateBoundary, latestReplayBoundary,
-                   latestReplayBoundary != promptReplayBoundary(active), true);
+                   latestReplayBoundary != publication, true);
   // A resumed lane below its prompt's replay point lost that state; it
   // rebuilds the one its conversation's next turn resumes from on the way.
-  addStateBoundary(active, stateBoundary, promptReplayBoundary(active), false, true);
+  // A request that named its own boundary publishes that page alone, not the
+  // generation prompt's page as a second state.
+  if (!hasRequestedBoundary)
+    addStateBoundary(active, stateBoundary, promptReplayBoundary(active), false,
+                     true);
 
   static_cast<void>(addSharedPrefillBoundaries(active, stateBoundary, true));
   return pendingDraftStatePlan(active, stateBoundary);
@@ -1363,6 +1397,7 @@ DraftContextPlan Engine::pendingDraftStatePlan(const Request &active,
 void Engine::discardPendingStateBoundaries(Request &active) noexcept {
   active.stateBoundaries.clear();
   active.stateBoundaryCursor = 0;
+  active.replayPublicationTokens = 0;
 }
 
 bool Engine::checkpointShared(const Request &active) const {
@@ -1468,7 +1503,8 @@ bool Engine::publishStateBoundary(Request &active, Request::StateBoundary object
   // The conversation's next turn resumes from the prompt's replay point. A
   // rebuilt replay point counts as a replay-state publication, not a
   // junction.
-  const bool replay = !checkpoint && objective.tokens == promptReplayBoundary(active);
+  const bool replay = !checkpoint &&
+                      objective.tokens == replayPublicationBoundary(active);
   // It and the head's state keep the lane's checkpoint cached.
   const bool keeps = keepsCheckpoint(active, objective);
   uint64_t &failures = checkpoint ? counters_.checkpointPublicationFailures
