@@ -736,34 +736,94 @@ void testRequestedReplayTailPublishesItsPage() {
   require(events.starts == std::vector<uint32_t>{0, 32},
           "the retry did not resume from the requested page");
   EngineRequest pageTooSmall = request(3, std::vector<uint32_t>(64, 9));
-  pageTooSmall.replayTailTokens = 64;
+  pageTooSmall.replayTailTokens = 40;
   rejects([&] { engine.submit(std::move(pageTooSmall)); },
-          "replay tail", "an out-of-range replay tail was accepted");
+          "replay_tail_tokens", "a page-zero replay tail was accepted");
+  EngineRequest beyondPrompt = request(4, std::vector<uint32_t>(64, 9));
+  beyondPrompt.replayTailTokens = 64;
+  rejects([&] { engine.submit(std::move(beyondPrompt)); },
+          "replay_tail_tokens", "an out-of-range replay tail was accepted");
 }
 
-// A requested page a request resumed at or past is ignored in favour of the
-// generation prompt's page: the request keeps the state it already restored.
-void testRequestedBoundaryIsClampedToTheResumedState() {
-  test::EngineHarness h({.pages = 32});
+// A request whose requested page is at or below the state it resumed at
+// keeps the generation prompt's page: the clamp is the default path, not a
+// replacement of the resumed state.
+void testRequestedBoundaryAtOrBelowResumeKeepsTheDefaultPage() {
+  test::EngineHarness h({.pages = 64});
   engine::Cache &resources = h.cache;
   engine::Engine &engine = h.engine;
   std::vector<uint32_t> prompt(100);
   std::iota(prompt.begin(), prompt.end(), 1);
   EngineRequest first = request(1, prompt);
   first.generationPromptTokens = 7;
+  first.replayTailTokens = 37;
   engine.submit(std::move(first));
   h.runUntilIdle();
-  require(resources.lookup(prompt, {}).resumeBoundary() == 64,
-          "the default replay page was not published");
+  require(resources.lookup(prompt, {}).resumeBoundary() == 32,
+          "the requested replay page was not published");
   EngineRequest second = request(2, prompt);
   second.generationPromptTokens = 7;
   second.replayTailTokens = 37;
   engine.submit(std::move(second));
   h.runUntilIdle();
   require(resources.lookup(prompt, {}).resumeBoundary() == 64 &&
-              engine.snapshot().resources.stateCache.entries == 1 &&
-              engine.snapshot().replayStatePublications == 1,
-          "a requested page below the resumed state replaced it");
+              engine.snapshot().resources.stateCache.entries == 2 &&
+              engine.snapshot().replayStatePublications == 2,
+          "a requested page below the resumed state did not keep the default page");
+}
+
+// A requested page is planned and published even when the prompt has generated
+// history: the resumed state's own page is not the requested publication.
+void testRequestedPageSurvivesResumedGeneratedHistory() {
+  test::EngineHarness h({.pages = 64});
+  engine::Cache &resources = h.cache;
+  engine::Engine &engine = h.engine;
+  std::vector<uint32_t> prompt(100);
+  std::iota(prompt.begin(), prompt.end(), 1);
+  EngineRequest first = request(1, prompt);
+  first.generationPromptTokens = 7;
+  first.replayTailTokens = 37;
+  engine.submit(std::move(first));
+  h.runUntilIdle();
+  require(resources.lookup(prompt, {}).resumeBoundary() == 32,
+          "the requested replay page was not published");
+  // The same prompt with a longer tail asks for page 64; it resumes at 32,
+  // then must publish 64 for the next request.
+  EngineRequest second = request(2, prompt);
+  second.generationPromptTokens = 7;
+  second.replayTailTokens = 20;
+  engine.submit(std::move(second));
+  h.runUntilIdle();
+  require(resources.lookup(prompt, {}).resumeBoundary() == 64 &&
+              engine.snapshot().replayStatePublications == 2,
+          "the requested page was not planned after the resumed state");
+  EngineRequest third = request(3, prompt);
+  third.generationPromptTokens = 7;
+  third.replayTailTokens = 20;
+  engine.submit(std::move(third));
+  h.runUntilIdle();
+  require(resources.lookup(prompt, {}).resumeBoundary() == 64 &&
+              engine.snapshot().replayStatePublications == 2,
+          "a later request did not resume the requested page");
+}
+
+// N=10 asks for the page before the last ten prompt tokens, at every length.
+void testRequestedReplayTailPagesForSeveralLengths() {
+  for (const uint32_t length : {43u, 64u, 100u, 129u, 256u}) {
+    test::EngineHarness h({.pages = 64});
+    engine::Cache &resources = h.cache;
+    engine::Engine &engine = h.engine;
+    std::vector<uint32_t> prompt(length);
+    std::iota(prompt.begin(), prompt.end(), 1);
+    EngineRequest value = request(1, prompt);
+    value.generationPromptTokens = 7;
+    value.replayTailTokens = 10;
+    engine.submit(std::move(value));
+    h.runUntilIdle();
+    const uint32_t expected = (length - 10) / 32 * 32;
+    require(resources.lookup(prompt, {}).resumeBoundary() == expected,
+            "a requested ten-token tail did not publish the opening page");
+  }
 }
 
 // A next turn that renders the generation prompt differently diverges inside
@@ -2040,7 +2100,9 @@ std::span<const test::TestCase> requestsTests() {
       {"testConcurrentDuplicateStateIsCapturedOnce", testConcurrentDuplicateStateIsCapturedOnce},
       {"testReplayStateEndsBeforeTheGenerationPrompt", testReplayStateEndsBeforeTheGenerationPrompt},
       {"testRequestedReplayTailPublishesItsPage", testRequestedReplayTailPublishesItsPage},
-      {"testRequestedBoundaryIsClampedToTheResumedState", testRequestedBoundaryIsClampedToTheResumedState},
+      {"testRequestedBoundaryAtOrBelowResumeKeepsTheDefaultPage", testRequestedBoundaryAtOrBelowResumeKeepsTheDefaultPage},
+      {"testRequestedPageSurvivesResumedGeneratedHistory", testRequestedPageSurvivesResumedGeneratedHistory},
+      {"testRequestedReplayTailPagesForSeveralLengths", testRequestedReplayTailPagesForSeveralLengths},
       {"testFollowUpResumesBeforeTheGenerationPrompt", testFollowUpResumesBeforeTheGenerationPrompt},
       {"testRetryPublishesNoStateInsideTheGenerationPrompt", testRetryPublishesNoStateInsideTheGenerationPrompt},
       {"testSharedJunctionEndsBeforeTheGenerationPrompt", testSharedJunctionEndsBeforeTheGenerationPrompt},

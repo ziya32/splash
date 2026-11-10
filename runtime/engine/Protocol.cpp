@@ -1,5 +1,6 @@
 #include "engine/Protocol.hpp"
 #include "Checked.hpp"
+#include "engine/KvCache.hpp"
 
 #include <algorithm>
 #include <bit>
@@ -340,7 +341,9 @@ std::optional<ProtocolIssue> validateRequest(const RequestFrame &request,
   }
   if (request.replayTailTokens != 0 &&
       (request.replayTailTokens >= request.promptTokens.size() ||
-       request.replayTailTokens < request.generationPromptTokens)) {
+       request.replayTailTokens < request.generationPromptTokens ||
+       request.promptTokens.size() - request.replayTailTokens <
+           engine::KvCache::pageTokens)) {
     return invalid(IssueCode::InvalidCount,
                    "replay tail must leave a prompt page and start at or "
                    "before the generation prompt");

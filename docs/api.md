@@ -75,7 +75,9 @@ Completions, text completions, Responses and Messages share these fields:
   so a warm-up can save an opening's page for a later turn to resume from. It
   must leave a prompt page and start at or before the generation prompt;
   another value returns 400 and names the field. A raw text completion has no
-  generation prompt and refuses a non-zero value.
+  generation prompt and refuses a non-zero value. Counting, scoring and
+  judgment requests do not generate from a chat generation prompt and do not
+  take it.
 
 Chat Completions also takes `messages`, `tools`, `tool_choice` and
 `parallel_tool_calls` ([tool calls](#tool-calls)), `response_format`

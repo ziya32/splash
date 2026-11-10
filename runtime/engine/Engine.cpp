@@ -139,8 +139,8 @@ void Engine::submit(EngineRequest value) {
        value.replayTailTokens < value.generationPromptTokens ||
        requestState.promptTokens - value.replayTailTokens < KvCache::pageTokens)) {
     throw std::invalid_argument(
-        "replay tail must leave a prompt page and start at or before the "
-        "generation prompt");
+        "replay_tail_tokens must leave a prompt page and start at or before "
+        "the generation prompt");
   }
   requestState.outputLimit = value.maxNewTokens;
   requestState.request = std::move(value);
@@ -1236,25 +1236,31 @@ DraftContextPlan Engine::configureDraftStatePlan(Request &active,
                                    ? requested
                                    : promptReplayBoundary(active);
   active.replayPublicationTokens = publication;
-  const uint32_t latestReplayBoundary = replayStateBoundary(active);
   // Plan draft windows before prefill; arbitrary chunk ends do not carry a
   // complete draft state, the point the lane resumes from does. Progress
-  // points remain disposable after restoration.
+  // points remain disposable after restoration. A request that named its own
+  // boundary publishes that page and no other, including when it resumed
+  // past the generation prompt's page: its history's replay boundary is not
+  // the page it asked to publish.
+  const uint32_t planEnd = hasRequestedBoundary
+                               ? publication
+                               : replayStateBoundary(active);
   for (const uint32_t checkpoint : plannedCheckpoints(
-           stateBoundary, latestReplayBoundary, config_.prefillCheckpointTokens)) {
+           stateBoundary, planEnd, config_.prefillCheckpointTokens)) {
     addStateBoundary(active, stateBoundary, checkpoint, true, true);
   }
   if (junctionBoundary >= stateBoundary + kMinimumJunctionGain)
     addStateBoundary(active, stateBoundary, junctionBoundary, false, true);
-  addStateBoundary(active, stateBoundary, latestReplayBoundary,
-                   latestReplayBoundary != publication, true);
-  // A resumed lane below its prompt's replay point lost that state; it
-  // rebuilds the one its conversation's next turn resumes from on the way.
-  // A request that named its own boundary publishes that page alone, not the
-  // generation prompt's page as a second state.
-  if (!hasRequestedBoundary)
+  if (hasRequestedBoundary) {
+    addStateBoundary(active, stateBoundary, publication, false, true);
+  } else {
+    addStateBoundary(active, stateBoundary, planEnd,
+                     planEnd != promptReplayBoundary(active), true);
+    // A resumed lane below its prompt's replay point lost that state; it
+    // rebuilds the one its conversation's next turn resumes from on the way.
     addStateBoundary(active, stateBoundary, promptReplayBoundary(active), false,
                      true);
+  }
 
   static_cast<void>(addSharedPrefillBoundaries(active, stateBoundary, true));
   return pendingDraftStatePlan(active, stateBoundary);
@@ -1262,9 +1268,14 @@ DraftContextPlan Engine::configureDraftStatePlan(Request &active,
 
 bool Engine::addStateBoundary(Request &active, uint32_t after, uint32_t tokens,
                               bool disposable, bool completeAfter) {
-  // A state past the replay boundary would lie inside the generation prompt,
-  // which a later request may not share.
-  if (tokens <= after || tokens > replayStateBoundary(active))
+  // A state past the boundary this plan may publish would lie inside a prompt
+  // or history the request does not share. A requested page is the plan's
+  // ceiling even when the request resumed past it; without one the ceiling is
+  // the replay state itself.
+  const uint32_t ceiling = active.request.replayTailTokens != 0
+                               ? replayPublicationBoundary(active)
+                               : replayStateBoundary(active);
+  if (tokens <= after || tokens > ceiling)
     return false;
   const auto remaining = active.stateBoundaries.begin() + active.stateBoundaryCursor;
   const auto found = std::lower_bound(

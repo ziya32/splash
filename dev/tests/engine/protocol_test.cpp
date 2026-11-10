@@ -923,6 +923,26 @@ void testSamplingBlock() {
 // for its prompt's progress, unconstrained generation can ignore
 // end-of-sequence; an undefined bit, or that flag on a constrained or score
 // request, is the request's own error.
+void testReplayTailValidation() {
+  constexpr std::string_view test = "replay tail";
+  RequestFrame request = exampleRequest();
+  request.promptTokens.resize(42);
+  for (uint32_t index = 0; index < request.promptTokens.size(); ++index)
+    request.promptTokens[index] = index + 1;
+  request.generationPromptTokens = 7;
+  request.replayTailTokens = 10;
+  CHECK(test, roundTrip(request) == request);
+
+  request.replayTailTokens = 1;
+  expectRequestIssue(test, request, IssueCode::InvalidCount);
+  request.replayTailTokens = 7;
+  CHECK(test, roundTrip(request) == request);
+  request.replayTailTokens = 40;
+  expectRequestIssue(test, request, IssueCode::InvalidCount);
+  request.replayTailTokens = 42;
+  expectRequestIssue(test, request, IssueCode::InvalidCount);
+}
+
 void testRequestFlags() {
   constexpr std::string_view test = "request flags";
   RequestFrame request = exampleIgnoreEosRequest();
@@ -1233,6 +1253,7 @@ int main(int argc, char **argv) {
     testMalformedPayloadClassification();
     testPromptAndImageSpanRejections();
     testSamplingBlock();
+    testReplayTailValidation();
     testRequestFlags();
     testThinkingBudget();
     testBoundedArbitraryStatusJsonAndFrames();
