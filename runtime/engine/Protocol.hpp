@@ -18,7 +18,7 @@
 // pins the bytes both sides agree on.
 namespace splash::protocol {
 
-inline constexpr uint16_t kProtocolVersion = 16;
+inline constexpr uint16_t kProtocolVersion = 17;
 // A frame is its header, the magic "SPLH", the u16 protocol version, the
 // u16 FrameType and the u64 payload length, then the payload.
 inline constexpr size_t kFrameHeaderBytes = 16;
@@ -140,11 +140,12 @@ validateLimits(const ProtocolLimits &limits);
 //  106 u32 thinking end token count, u32 thinkingBudget.alsoEnds, zero
 //      without a budget
 //  114 u32 headTokens
+//  118 u32 replayTailTokens
 // then the prompt tokens, the 40-byte image spans (u32 offset, tokens, grid
 // height and width in patches, content height and width in pixels, u64 digest
 // low and high halves), the image pixels, the score tokens and the thinking
 // end tokens.
-inline constexpr uint64_t kRequestFixedBytes = 118;
+inline constexpr uint64_t kRequestFixedBytes = 122;
 inline constexpr uint32_t kNoThinkingBudget = 0xFFFFFFFFU;
 // A thinking budget's end holds 1 to this many tokens.
 inline constexpr uint32_t kMaximumThinkingEndTokens = 64;
@@ -185,6 +186,10 @@ struct RequestFrame {
   // Where the prompt's head (a system prompt and tools) ends; zero
   // without one. It must leave at least one prompt token.
   uint32_t headTokens = 0;
+  // When non-zero, the replay state is published at the last whole page before
+  // the last this many prompt tokens, instead of before the generation prompt;
+  // zero takes the generation prompt's page.
+  uint32_t replayTailTokens = 0;
   // RequestFlag bits and kReturnProgressFlag.
   uint32_t flags = 0;
   // The request's cache_salt as the server hashed it; zero without one.

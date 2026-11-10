@@ -75,6 +75,9 @@ struct EngineRequest final {
   // Where the prompt's head ends, its system prompt and tools before any other message, which other conversations may
   // share: a state is kept there on first use (Engine::configureDraftStatePlan). Zero when there is none.
   uint32_t headTokens = 0;
+  // When non-zero, publish the replay state at the last whole page before the
+  // last this many prompt tokens. Zero uses generationPromptTokens's page.
+  uint32_t replayTailTokens = 0;
   std::vector<ImageSpan> images;
   std::vector<uint8_t> imagePixels;
   uint32_t maxNewTokens = 0;
