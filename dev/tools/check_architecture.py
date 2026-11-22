@@ -255,7 +255,11 @@ NOTE_ALLOWANCE: dict[str, int] = {
 # conversation went on. 31,103 adds 7 for the split's warmup, which holds only
 # the pages its rows use and allocates again an extent the first audit
 # released.
-ENGINE_LINE_BUDGET = 31_103
+# 31,181 adds 78 for the requested replay tail: the field in the frame and
+# engine request, the page its plan publishes, that page's classification as
+# the replay point, and its place among the states that keep a lane's
+# checkpoint.
+ENGINE_LINE_BUDGET = 31_181
 C_LIKE_SUFFIXES = SOURCE_SUFFIXES | {".swift"}
 HASH_COMMENT_SUFFIXES = {"", ".sh", ".bash", ".fish", ".mk", ".yml", ".yaml", ".toml"}
 C_LIKE_COMMENT = re.compile(
