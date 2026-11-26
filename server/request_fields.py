@@ -30,6 +30,12 @@ CHAT_GENERATION_FIELDS = (
     "priority",
     "cache_salt",
 )
+# The fields a chat-shaped dialect (Messages, Responses) forwards to the
+# Chat body it converts to: Chat's generation fields plus the replay tail,
+# which Chat takes too. A dialect that copies only CHAT_GENERATION_FIELDS
+# drops the tail, so both use this tuple. A raw text completion has no
+# generation prompt and keeps refusing a non-zero tail.
+CHAT_DIALECT_FIELDS = (*CHAT_GENERATION_FIELDS, "replay_tail_tokens")
 
 
 MIN_FLOAT32_SUBNORMAL = float.fromhex("0x1p-149")

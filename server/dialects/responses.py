@@ -526,7 +526,7 @@ def to_chat_body(body, items):
     # as logit_bias, is refused rather than dropped.
     for field_name in (
         "model",
-        *request_fields.CHAT_GENERATION_FIELDS,
+        *request_fields.CHAT_DIALECT_FIELDS,
         "stop",
         "max_output_tokens",
         "chat_template_kwargs",

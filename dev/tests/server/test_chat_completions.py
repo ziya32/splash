@@ -4,14 +4,36 @@ from dataclasses import replace
 
 from dev.tests.server_fixtures import (
     FakeRuntime,
+    FakeTokenizer,
     HarnessTestCase,
     Plan,
+    anthropic_body,
     chat_body,
     openai_client,
     responses_body,
 )
 from server import protocol as p
 from server.chat_format import QWEN
+
+
+class LongPromptTokenizer(FakeTokenizer):
+    """A 200-token prompt, longer than a page, that ends with a two-token
+    generation prompt, so a requested replay tail leaves a whole page."""
+
+    GENERATION_PROMPT = "<|im_start|>assistant\n<think>\n"
+
+    def apply_chat_template(self, messages, **kwargs):
+        rendered = "x" * 100
+        if kwargs.get("add_generation_prompt"):
+            rendered += self.GENERATION_PROMPT
+        return (
+            rendered if kwargs.get("tokenize") is False else self(rendered)["input_ids"]
+        )
+
+    def __call__(self, text, **kwargs):
+        if text == self.GENERATION_PROMPT:
+            return {"input_ids": [1001, 1002]}
+        return {"input_ids": [1000] * 198 + [1001, 1002]}
 
 
 class ChatCompletionTests(HarnessTestCase):
@@ -174,7 +196,7 @@ class ChatCompletionTests(HarnessTestCase):
         self.assertEqual(response["usage"]["completion_tokens"], 2)
         self.assertEqual((runtime.stop_count, runtime.cancel_count), (1, 0))
 
-    def test_replay_tail_is_validated_and_reaches_the_engine(self):
+    def test_replay_tail_is_validated_by_chat_and_refused_by_completions(self):
         # The field names itself when malformed, and a chat-shaped request
         # whose real prompt leaves a page forwards it to the engine.
         short = self.harness(FakeRuntime(Plan([[1]])))
@@ -215,6 +237,40 @@ class ChatCompletionTests(HarnessTestCase):
         )
         self.assertEqual(status, 400)
         self.assertIn(b"replay_tail_tokens", payload)
+
+    def test_every_chat_shaped_api_forwards_the_replay_tail(self):
+        """Chat, Responses and Messages all convert to the Chat body that
+        carries request_fields.CHAT_DIALECT_FIELDS; a field only Chat
+        forwards would be dropped by the other two without a 400."""
+        bodies = (
+            ("/v1/chat/completions", chat_body(replay_tail_tokens=10)),
+            ("/v1/responses", responses_body(replay_tail_tokens=10)),
+            ("/v1/messages", anthropic_body(replay_tail_tokens=10)),
+        )
+        runtime = FakeRuntime(*(Plan([[1]]) for _ in bodies))
+        harness = self.harness(
+            runtime, tokenizer=LongPromptTokenizer(), max_context=4096
+        )
+        for path, body in bodies:
+            status, _, payload = harness.request("POST", path, body)
+            self.assertEqual(status, 200, (path, payload))
+        self.assertEqual(
+            [request.frame.replay_tail_tokens for request in runtime.requests],
+            [10, 10, 10],
+        )
+
+        # A malformed value names the field on every chat-shaped route.
+        runtime = FakeRuntime(*(Plan([[1]]) for _ in bodies))
+        harness = self.harness(
+            runtime, tokenizer=LongPromptTokenizer(), max_context=4096
+        )
+        for path, body in bodies:
+            status, _, payload = harness.request(
+                "POST", path, {**body, "replay_tail_tokens": "ten"}
+            )
+            self.assertEqual(status, 400, (path, payload))
+            self.assertIn(b"replay_tail_tokens", payload)
+        self.assertEqual(runtime.requests, [])
 
     def test_usage_counts_only_tokens_before_the_thinking_delimiter(self):
         # The fake vocabulary's </think> is token 26.

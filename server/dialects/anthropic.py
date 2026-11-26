@@ -112,7 +112,7 @@ def to_chat_body(body, *, thinking_resolver):
     chat.update(
         max_completion_tokens=max_tokens,
         stop=_stop_sequences(body.get("stop_sequences")),
-        **{name: body.get(name) for name in request_fields.CHAT_GENERATION_FIELDS},
+        **{name: body.get(name) for name in request_fields.CHAT_DIALECT_FIELDS},
     )
     chat = {key: value for key, value in chat.items() if value is not None}
     return chat, omitted
