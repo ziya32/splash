@@ -134,6 +134,16 @@ def example_progress_request():
     return replace(example_request(), flags=p.RequestFlag.RETURN_PROGRESS)
 
 
+def example_replay_tail_request():
+    """Ten trailing prompt tokens after a whole page: the wire's non-zero
+    replay tail."""
+    return replace(
+        example_request(),
+        prompt_tokens=tuple(range(42)),
+        replay_tail_tokens=10,
+    )
+
+
 def client_messages():
     return {
         "request": example_request(),
@@ -141,6 +151,7 @@ def client_messages():
         "request_score": example_score_request(),
         "request_ignore_eos": example_ignore_eos_request(),
         "request_progress": example_progress_request(),
+        "request_replay_tail": example_replay_tail_request(),
         "cancel": p.CancelFrame(91),
         # Mask row 1 forces two tokens after its path, row 2 one.
         "mask_response": p.MaskResponseFrame(
@@ -925,10 +936,13 @@ class ProtocolPythonTests(unittest.TestCase):
     def test_replay_tail_must_leave_a_page_and_start_at_the_generation_prompt(self):
         request = replace(
             example_request(),
-            prompt_tokens=(7,) + tuple(range(40)),
+            prompt_tokens=(7,) + tuple(range(p.PAGE_TOKENS + 8)),
             generation_prompt_tokens=7,
         )
-        for tail in (1, 40, 41):
+        # A tail longer than this leaves fewer than a page.
+        largest_tail = len(request.prompt_tokens) - p.PAGE_TOKENS
+        self.assertEqual(largest_tail, 9)
+        for tail in (1, largest_tail + 1, len(request.prompt_tokens)):
             with self.subTest(tail=tail):
                 issue = self.assert_protocol_error(
                     p.FailureClass.REQUEST_ERROR,
@@ -938,7 +952,7 @@ class ProtocolPythonTests(unittest.TestCase):
                     ),
                 )
                 self.assertEqual(issue.request_id, request.request_id)
-        for tail in (0, 7, 9):
+        for tail in (0, 7, largest_tail):
             with self.subTest(tail=tail):
                 valid = replace(request, replay_tail_tokens=tail)
                 self.assertEqual(decode_client(p.serialize_message(valid)), valid)

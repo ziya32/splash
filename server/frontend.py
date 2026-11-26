@@ -1060,7 +1060,7 @@ class Frontend:
                 not generation_prompt
                 or replay_tail >= len(prompt_tokens)
                 or replay_tail < generation_prompt
-                or len(prompt_tokens) - replay_tail < 32
+                or len(prompt_tokens) - replay_tail < wire.PAGE_TOKENS
             ):
                 raise APIError(
                     400,

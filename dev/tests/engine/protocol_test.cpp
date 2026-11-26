@@ -223,6 +223,15 @@ RequestFrame exampleProgressRequest() {
   return request;
 }
 
+RequestFrame exampleReplayTailRequest() {
+  RequestFrame request = exampleRequest();
+  request.promptTokens.resize(42);
+  for (uint32_t index = 0; index < request.promptTokens.size(); ++index)
+    request.promptTokens[index] = index;
+  request.replayTailTokens = 10;
+  return request;
+}
+
 const std::vector<std::pair<std::string, ClientMessage>> &clientMessages() {
   static const std::vector<std::pair<std::string, ClientMessage>> messages{
       {"request", exampleRequest()},
@@ -230,6 +239,7 @@ const std::vector<std::pair<std::string, ClientMessage>> &clientMessages() {
       {"request_score", exampleScoreRequest()},
       {"request_ignore_eos", exampleIgnoreEosRequest()},
       {"request_progress", exampleProgressRequest()},
+      {"request_replay_tail", exampleReplayTailRequest()},
       {"cancel", CancelFrame{91}},
       // Mask row 1 forces two tokens after its path, row 2 one.
       {"mask_response",

@@ -47,6 +47,10 @@ NO_PARENT = 0xFFFFFFFF
 MAX_FORCED_WORDS = 2 * (MAX_SIMULATION_TOKENS + 1) * MAX_SIMULATION_TOKENS
 MAX_IMAGE_SPANS = 64
 MAX_MASK_WORDS = 1 << 20
+# Tokens in one KV page: runtime/metal/abi/ExecutionGeometry.h's
+# SPLASH_TARGET_KV_BLOCK_TOKENS, which the engine serves as
+# KvCache::pageTokens. A replay tail leaves at least this whole page.
+PAGE_TOKENS = 32
 
 _MAGIC = b"SPLH"
 _HEADER = struct.Struct("<4sHHQ")
@@ -873,7 +877,7 @@ def _validated_request(
         if replay_tail and (
             replay_tail >= len(prompt)
             or replay_tail < generation
-            or len(prompt) - replay_tail < 32
+            or len(prompt) - replay_tail < PAGE_TOKENS
         ):
             raise ValueError(
                 "replay_tail_tokens must leave a prompt page and start at or "
