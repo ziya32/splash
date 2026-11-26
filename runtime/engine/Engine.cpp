@@ -1317,9 +1317,9 @@ DraftContextPlan Engine::configureDraftStatePlan(Request &active,
   // Plan draft windows before prefill; arbitrary chunk ends do not carry a
   // complete draft state, the point the lane resumes from does. Progress
   // points remain disposable after restoration. A request that named its own
-  // boundary publishes that page and no other, including when it resumed
-  // past the generation prompt's page: its history's replay boundary is not
-  // the page it asked to publish.
+  // boundary publishes that page and no other replay-state page, even when
+  // it resumed past the prompt's page; checkpoints, the head's state and
+  // junctions below still publish.
   const uint32_t planEnd = hasRequestedBoundary
                                ? publication
                                : replayStateBoundary(active);
@@ -1351,10 +1351,10 @@ DraftContextPlan Engine::configureDraftStatePlan(Request &active,
 
 bool Engine::addStateBoundary(Request &active, uint32_t after, uint32_t tokens,
                               bool disposable, bool completeAfter) {
-  // A state past the boundary this plan may publish would lie inside a prompt
-  // or history the request does not share. A requested page is the plan's
-  // ceiling even when the request resumed past it; without one the ceiling is
-  // the replay state itself.
+  // A state past the boundary this plan may publish would lie inside a
+  // prompt or history the request does not share. A requested page is the
+  // ceiling past the resumed state; at or below it the generation prompt's
+  // page publishes, and without either the ceiling is the replay state.
   const uint32_t ceiling = active.request.replayTailTokens != 0
                                ? replayPublicationBoundary(active)
                                : replayStateBoundary(active);
